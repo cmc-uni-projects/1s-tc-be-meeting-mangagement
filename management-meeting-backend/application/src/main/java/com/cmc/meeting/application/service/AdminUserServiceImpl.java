@@ -61,6 +61,7 @@ public class AdminUserServiceImpl implements AdminUserService {
     public List<AdminUserDTO> getAllUsers() {
         List<User> users = userRepository.findAll();
         return users.stream()
+                .filter(user -> !user.getUsername().contains("_disabled_"))
                 .map(user -> modelMapper.map(user, AdminUserDTO.class))
                 .collect(Collectors.toList());
     }

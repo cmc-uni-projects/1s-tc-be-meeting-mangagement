@@ -29,10 +29,12 @@ public class MeetingEventListener {
 
     private static final Logger log = LoggerFactory.getLogger(MeetingEventListener.class);
     
+    // Inject từ application.yml -> app.backend.base-url
     @Value("${app.backend.base-url}")
     private String backendBaseUrl;
     
-    @Value("${app.frontend.base-url}") // Dùng cho link xem chi tiết
+    // Inject từ application.yml -> app.frontend.base-url
+    @Value("${app.frontend.base-url}") 
     private String frontendBaseUrl;
 
     private final EmailNotificationPort emailSender;
@@ -107,7 +109,7 @@ public class MeetingEventListener {
                 meeting
             );
             
-            // B. Gửi Email thông báo cập nhật (MỚI)
+            // B. Gửi Email thông báo cập nhật
             sendUpdateEmails(meeting);
 
         } catch (Exception e) {
@@ -130,8 +132,7 @@ public class MeetingEventListener {
                 );
             }
             
-            // B. Gửi Email thông báo hủy (MỚI)
-            // Cần load lại meeting để lấy danh sách người nhận
+            // B. Gửi Email thông báo hủy
             Meeting meeting = meetingRepository.findById(event.getMeetingId())
                     .orElseThrow(() -> new EntityNotFoundException("Meeting not found"));
             
@@ -148,6 +149,8 @@ public class MeetingEventListener {
         
         String internalTemplateKey = "email.template.internal";
         String respondEndpoint = "/meetings/respond-by-link";
+        
+        // Sử dụng Backend URL (API) cho link xác nhận tham gia
         String baseUrl = backendBaseUrl + respondEndpoint;
 
         if (meeting.getParticipants() != null) {
@@ -168,9 +171,9 @@ public class MeetingEventListener {
         String subject = "CẬP NHẬT: " + meeting.getTitle();
         Map<String, Object> variables = buildCommonVariables(meeting);
         
-        // Link xem chi tiết
-        String link = (frontendBaseUrl != null ? frontendBaseUrl : "http://localhost:5173") 
-                      + "/meetings/" + meeting.getId();
+        // --- SỬA ĐỔI QUAN TRỌNG ---
+        // Sử dụng trực tiếp frontendBaseUrl từ cấu hình
+        String link = frontendBaseUrl + "/meetings/" + meeting.getId();
         variables.put("meetingUrl", link);
 
         String templateKey = "email.template.meeting-update";

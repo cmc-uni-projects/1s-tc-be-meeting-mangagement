@@ -41,14 +41,27 @@ public class SecurityConfig {
     @Value("${app.jwt.secret}")
     private String localJwtSecret;
 
+    // [MỚI] Inject danh sách Allowed Origins từ application.yml
+    // Spring sẽ tự động chuyển chuỗi phân cách bằng dấu phẩy thành List
+    @Value("#{'${app.cors.allowed-origins}'.split(',')}")
+    private List<String> allowedOrigins;
+
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("*"));
-        configuration.setAllowedMethods(List.of("*"));
-        configuration.setAllowedHeaders(List.of("*"));
-        configuration.setAllowCredentials(true);
         
+        // [CẬP NHẬT] Sử dụng biến môi trường thay vì "*"
+        configuration.setAllowedOrigins(allowedOrigins);
+        
+        // Cấu hình các method cho phép
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+        
+        // Cho phép tất cả headers
+        configuration.setAllowedHeaders(List.of("*"));
+        
+        // Cho phép gửi Cookie/Credentials
+        configuration.setAllowCredentials(true);
+
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
@@ -60,7 +73,8 @@ public class SecurityConfig {
     }
 
     @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration)
+            throws Exception {
         return authenticationConfiguration.getAuthenticationManager();
     }
 
@@ -70,7 +84,7 @@ public class SecurityConfig {
 
         SecretKeySpec secretKey = new SecretKeySpec(localJwtSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA512");
         NimbusJwtDecoder localDecoder = NimbusJwtDecoder.withSecretKey(secretKey)
-                .macAlgorithm(MacAlgorithm.HS512) 
+                .macAlgorithm(MacAlgorithm.HS512)
                 .build();
 
         return token -> {
@@ -92,9 +106,9 @@ public class SecurityConfig {
             .httpBasic(basic -> basic.disable())
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
-                    "/api/v1/auth/**", 
-                    "/v3/api-docs/**", 
-                    "/swagger-ui/**", 
+                    "/api/v1/auth/**",
+                    "/v3/api-docs/**",
+                    "/swagger-ui/**",
                     "/swagger-ui.html",
                     "/api/v1/meetings/respond-by-link"
                 ).permitAll()
@@ -108,9 +122,9 @@ public class SecurityConfig {
                     .decoder(jwtDecoder())
                     .jwtAuthenticationConverter(customJwtAuthenticationConverter)
                 )
-                .authenticationEntryPoint(jwtAuthenticationEntryPoint) 
+                .authenticationEntryPoint(jwtAuthenticationEntryPoint)
             );
-        
+
         return http.build();
     }
 }
