@@ -1,16 +1,16 @@
 -- 1. Đặt biến mật khẩu băm (cho "123456")
 -- (Tôi đã tạo một hash hợp lệ mới cho "123456")
-SET @hashed_password = '$2a$10$P/1T23f.V4m2/J.a.Z.qS.OMs6.9.sA7.m.J.d.w.P.G.i.E.P.M';
+SET @hashed_password = '$2a$10$Pg3x77SOBql4SZ8ZuOhglOfQ//ko.z5HS6U062JEXoQ30dn6MQRD6';
 
 -- 2. Thêm phòng họp TRƯỚC
-INSERT INTO rooms (id, name, capacity, location) VALUES (1, 'Phòng Họp Sao Hỏa', 10, 'Tầng 10')
+INSERT INTO rooms (id, name, capacity, location, requires_approval) VALUES (1, 'Phòng Họp Sao Hỏa', 10, 'Tầng 10', FALSE)
     ON DUPLICATE KEY UPDATE name='Phòng Họp Sao Hỏa';
 
 -- 3. Thêm Users
-INSERT INTO users (id, username, full_name, password) VALUES (1, 'user1@cmc.com', 'User Một', @hashed_password) 
+INSERT INTO users (id, username, full_name, password, is_google_linked) VALUES (1, 'user1@cmc.com', 'User Một', @hashed_password, FALSE)
     ON DUPLICATE KEY UPDATE username='user1@cmc.com', password=@hashed_password;
 
-INSERT INTO users (id, username, full_name, password) VALUES (2, 'user2@cmc.com', 'User Hai', @hashed_password) 
+INSERT INTO users (id, username, full_name, password, is_google_linked) VALUES (2, 'user2@cmc.com', 'User Hai', @hashed_password, FALSE)
     ON DUPLICATE KEY UPDATE username='user2@cmc.com', password=@hashed_password;
 
 INSERT INTO app_configuration (config_key, config_value, description) 
