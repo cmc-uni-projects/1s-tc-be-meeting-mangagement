@@ -2,12 +2,14 @@ package com.cmc.meeting.application.port.security;
 
 import java.util.Set;
 
-// Đây là "Hợp đồng" (Port) mà Application Layer định nghĩa
 public interface TokenProvider {
 
-    // Định nghĩa các hàm mà AuthService cần
-
-    // (Chúng ta có thể thêm getUserIdFromToken, getUsernameFromToken...
-    // vào đây sau này nếu các service khác cần)
+    // Hàm tạo token (Đã có)
     String generateToken(Long userId, String username, Set<String> roles);
+
+    // [BỔ SUNG 1] Hàm lấy username từ token
+    String getUsernameFromToken(String token);
+
+    // [BỔ SUNG 2] Hàm kiểm tra token hợp lệ
+    boolean validateToken(String authToken);
 }

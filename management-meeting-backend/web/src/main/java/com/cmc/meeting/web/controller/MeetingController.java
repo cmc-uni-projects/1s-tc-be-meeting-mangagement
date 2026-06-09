@@ -1,346 +1,209 @@
 package com.cmc.meeting.web.controller;
 
-import com.cmc.meeting.application.dto.meeting.CheckInRequest;
-import com.cmc.meeting.application.dto.meeting.MeetingCancelRequest;
-import com.cmc.meeting.application.dto.meeting.MeetingResponseRequest;
+import com.cmc.meeting.application.dto.meeting.*;
 import com.cmc.meeting.application.dto.request.MeetingCreationRequest;
 import com.cmc.meeting.application.dto.request.MeetingUpdateRequest;
 import com.cmc.meeting.application.dto.response.MeetingDTO;
+import com.cmc.meeting.application.dto.timeslot.TimeSlotDTO;
+import com.cmc.meeting.application.dto.timeslot.TimeSuggestionRequest;
 import com.cmc.meeting.application.port.service.MeetingService;
+import com.cmc.meeting.application.port.service.TimeSuggestionService;
 import com.cmc.meeting.domain.model.Meeting;
 import com.cmc.meeting.domain.model.ParticipantStatus;
 import com.cmc.meeting.domain.model.User;
 import com.cmc.meeting.domain.port.repository.MeetingRepository;
-// BỔ SUNG: Import 2 thư viện này
 import com.cmc.meeting.domain.port.repository.UserRepository;
 import com.cmc.meeting.infrastructure.persistence.jpa.adapter.GoogleCalendarAdapter;
 
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-
-import org.springframework.data.domain.Sort;
-// -------------------------
-import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.validation.Valid;
-
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails; // Cũ
+import org.springframework.security.oauth2.jwt.Jwt; // Mới
 import org.springframework.web.bind.annotation.*;
-import com.cmc.meeting.application.dto.timeslot.TimeSlotDTO; // Bổ sung
-import com.cmc.meeting.application.dto.timeslot.TimeSuggestionRequest; // Bổ sung
-import com.cmc.meeting.application.port.service.TimeSuggestionService; // Bổ sung
 
 import java.util.Collections;
-import java.util.List; // Bổ sung
+import java.util.List;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/meetings")
 @Tag(name = "Meeting API", description = "API quản lý lịch họp")
+@SecurityRequirement(name = "bearerAuth")
 public class MeetingController {
 
-        private final MeetingService meetingService;
-        // BỔ SUNG: Chúng ta cần UserRepository để lấy User domain
-        private final UserRepository userRepository;
-        private final TimeSuggestionService timeSuggestionService;
-        private final MeetingRepository meetingRepository;
-        private final GoogleCalendarAdapter googleCalendarAdapter;
+    private final MeetingService meetingService;
+    private final UserRepository userRepository;
+    private final TimeSuggestionService timeSuggestionService;
+    private final MeetingRepository meetingRepository;
+    private final GoogleCalendarAdapter googleCalendarAdapter;
 
-        // CẬP NHẬT CONSTRUCTOR
-        public MeetingController(MeetingService meetingService,
-                        UserRepository userRepository,
-                        TimeSuggestionService timeSuggestionService,
-                        MeetingRepository meetingRepository, // <-- Thêm
-                        GoogleCalendarAdapter googleCalendarAdapter // <-- Thêm
-        ) {
-                this.meetingService = meetingService;
-                this.userRepository = userRepository;
-                this.timeSuggestionService = timeSuggestionService;
-                this.meetingRepository = meetingRepository; // <-- Gán
-                this.googleCalendarAdapter = googleCalendarAdapter; // <-- Gán
+    public MeetingController(MeetingService meetingService,
+                             UserRepository userRepository,
+                             TimeSuggestionService timeSuggestionService,
+                             MeetingRepository meetingRepository,
+                             GoogleCalendarAdapter googleCalendarAdapter) {
+        this.meetingService = meetingService;
+        this.userRepository = userRepository;
+        this.timeSuggestionService = timeSuggestionService;
+        this.meetingRepository = meetingRepository;
+        this.googleCalendarAdapter = googleCalendarAdapter;
+    }
+
+    // === HÀM HELPER ĐA NĂNG (HYBRID) ===
+    private Long getUserId(Object principal) {
+        String username;
+        if (principal instanceof UserDetails) {
+            username = ((UserDetails) principal).getUsername(); // Token cũ
+        } else if (principal instanceof Jwt) {
+            username = ((Jwt) principal).getSubject(); // Token OAuth2
+        } else {
+            throw new RuntimeException("Loại xác thực không hỗ trợ: " + principal.getClass());
         }
 
-        @PostMapping
-        @Operation(summary = "Tạo một lịch họp mới (US-1)")
-        public ResponseEntity<MeetingDTO> createMeeting(
-                        @Valid @RequestBody MeetingCreationRequest request,
-                        // BỔ SUNG: Tự động lấy user đã xác thực
-                        @AuthenticationPrincipal UserDetails userDetails) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new EntityNotFoundException("User không tồn tại: " + username));
+        return user.getId();
+    }
 
-                // 1. Lấy username từ token (đã được xác thực)
-                String username = userDetails.getUsername();
+    @PostMapping
+    public ResponseEntity<MeetingDTO> createMeeting(
+            @Valid @RequestBody MeetingCreationRequest request,
+            @AuthenticationPrincipal Object principal) {
+        Long userId = getUserId(principal);
+        MeetingDTO createdMeeting = meetingService.createMeeting(request, userId);
+        return new ResponseEntity<>(createdMeeting, HttpStatus.CREATED);
+    }
 
-                // 2. Dùng username để lấy đối tượng User (domain)
-                // (Vì service của chúng ta cần Long userId)
-                com.cmc.meeting.domain.model.User currentUser = userRepository.findByUsername(username)
-                                .orElseThrow(() -> new RuntimeException("Lỗi: Không tìm thấy user từ token"));
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> cancelMeeting(
+            @PathVariable Long id,
+            @Valid @RequestBody MeetingCancelRequest request,
+            @AuthenticationPrincipal Object principal) {
+        Long userId = getUserId(principal);
+        meetingService.cancelMeeting(id, request, userId);
+        return ResponseEntity.ok("Đã hủy cuộc họp thành công.");
+    }
 
-                // 3. Gọi service với ID user thật
-                MeetingDTO createdMeeting = meetingService.createMeeting(request, currentUser.getId());
+    @GetMapping("/{id}")
+    public ResponseEntity<MeetingDTO> getMeetingById(
+            @PathVariable Long id,
+            @AuthenticationPrincipal Object principal) {
+        Long userId = getUserId(principal);
+        MeetingDTO meetingDTO = meetingService.getMeetingById(id, userId);
+        return ResponseEntity.ok(meetingDTO);
+    }
 
-                return new ResponseEntity<>(createdMeeting, HttpStatus.CREATED); // 201
+    @GetMapping("/my-meetings")
+    public ResponseEntity<Page<MeetingDTO>> getMyMeetings(
+            @AuthenticationPrincipal Object principal,
+            @PageableDefault(size = 20, sort = "startTime", direction = Sort.Direction.DESC) Pageable pageable) {
+        Long userId = getUserId(principal);
+        Page<MeetingDTO> meetings = meetingService.getMyMeetings(userId, pageable);
+        return ResponseEntity.ok(meetings);
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<MeetingDTO> updateMeeting(
+            @PathVariable Long id,
+            @Valid @RequestBody MeetingUpdateRequest request,
+            @AuthenticationPrincipal Object principal) {
+        Long userId = getUserId(principal);
+        MeetingDTO updatedMeeting = meetingService.updateMeeting(id, request, userId);
+        return ResponseEntity.ok(updatedMeeting);
+    }
+
+    @PostMapping("/{id}/respond")
+    public ResponseEntity<?> respondToInvitation(
+            @PathVariable Long id,
+            @Valid @RequestBody MeetingResponseRequest request,
+            @AuthenticationPrincipal Object principal) {
+        Long userId = getUserId(principal);
+        meetingService.respondToInvitation(id, request, userId);
+        return ResponseEntity.ok("Đã phản hồi lời mời thành công.");
+    }
+
+    @PostMapping("/check-in")
+    public ResponseEntity<?> checkInToMeeting(
+            @Valid @RequestBody CheckInRequest request,
+            @AuthenticationPrincipal Object principal) {
+        Long userId = getUserId(principal);
+        String message = meetingService.checkIn(request, userId);
+        return ResponseEntity.ok(message);
+    }
+
+    @PostMapping("/suggest-time")
+    public ResponseEntity<List<TimeSlotDTO>> suggestTime(
+            @Valid @RequestBody TimeSuggestionRequest request) {
+        List<TimeSlotDTO> suggestions = timeSuggestionService.suggestTime(request);
+        return ResponseEntity.ok(suggestions);
+    }
+
+    @DeleteMapping("/series/{seriesId}")
+    public ResponseEntity<?> cancelMeetingSeries(
+            @PathVariable String seriesId,
+            @Valid @RequestBody MeetingCancelRequest request,
+            @AuthenticationPrincipal Object principal) {
+        Long userId = getUserId(principal);
+        meetingService.cancelMeetingSeries(seriesId, request, userId);
+        return ResponseEntity.ok("Đã hủy chuỗi thành công.");
+    }
+
+    @PutMapping("/series/{seriesId}")
+    public ResponseEntity<MeetingDTO> updateMeetingSeries(
+            @PathVariable String seriesId,
+            @Valid @RequestBody MeetingCreationRequest request,
+            @AuthenticationPrincipal Object principal) {
+        Long userId = getUserId(principal);
+        if (request.getRecurrenceRule() == null) throw new IllegalArgumentException("Thiếu rule lặp lại");
+        MeetingDTO firstMeeting = meetingService.updateMeetingSeries(seriesId, request, userId);
+        return ResponseEntity.ok(firstMeeting);
+    }
+
+    @PostMapping("/check-in/qr")
+    public ResponseEntity<String> checkInByQr(
+            @RequestBody Map<String, String> payload,
+            @AuthenticationPrincipal Object principal) {
+        String qrCode = payload.get("qrCode");
+        if (qrCode == null || qrCode.isBlank()) return ResponseEntity.badRequest().body("Mã QR trống");
+        Long userId = getUserId(principal);
+        meetingService.checkInByQrCode(qrCode, userId);
+        return ResponseEntity.ok("Check-in thành công!");
+    }
+
+    @GetMapping(value = "/respond-by-link", produces = "text/html;charset=UTF-8")
+    public ResponseEntity<String> respondByLink(@RequestParam String token, @RequestParam ParticipantStatus status) {
+        try {
+            String message = meetingService.respondByLink(token, status);
+            return ResponseEntity.ok("<html><body><h1>" + message + "</h1></body></html>");
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Lỗi: " + e.getMessage());
         }
+    }
 
-        @DeleteMapping("/{id}")
-        @Operation(summary = "Hủy một lịch họp (chỉ người tổ chức) - Bắt buộc lý do")
-        public ResponseEntity<?> cancelMeeting(
-                        @PathVariable Long id,
-                        @Valid @RequestBody MeetingCancelRequest request, // <-- THÊM
-                        @AuthenticationPrincipal UserDetails userDetails) {
+    @GetMapping("/{id}/sync/google")
+    public ResponseEntity<Map<String, String>> getGoogleCalendarLink(@PathVariable Long id) {
+        String googleLink = meetingService.generateGoogleCalendarLink(id);
+        return ResponseEntity.ok(Collections.singletonMap("url", googleLink));
+    }
 
-                com.cmc.meeting.domain.model.User currentUser = userRepository.findByUsername(userDetails.getUsername())
-                                .orElseThrow(() -> new RuntimeException("Lỗi: Không tìm thấy user từ token"));
-
-                // Gọi service (đã cập nhật)
-                meetingService.cancelMeeting(id, request, currentUser.getId());
-
-                return ResponseEntity.ok("Đã hủy cuộc họp thành công.");
+    @GetMapping("/{id}/test-sync-google")
+    public ResponseEntity<?> testSyncGoogle(@PathVariable Long id, @AuthenticationPrincipal Object principal) {
+        try {
+            Long userId = getUserId(principal);
+            Meeting meeting = meetingRepository.findById(id).orElseThrow(() -> new EntityNotFoundException("Meeting not found"));
+            googleCalendarAdapter.pushMeetingToGoogle(userId, meeting);
+            return ResponseEntity.ok("Sync OK");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Lỗi: " + e.getMessage());
         }
-
-        /**
-         * API Lấy chi tiết một cuộc họp (US ẩn)
-         * Chỉ người tổ chức hoặc người tham dự mới được xem.
-         */
-        @GetMapping("/{id}")
-        @Operation(summary = "Lấy chi tiết một cuộc họp (chỉ người tham gia/tổ chức)")
-        public ResponseEntity<MeetingDTO> getMeetingById(
-                        @PathVariable Long id,
-                        @AuthenticationPrincipal UserDetails userDetails) {
-
-                // 1. Lấy ID user từ token
-                com.cmc.meeting.domain.model.User currentUser = userRepository.findByUsername(userDetails.getUsername())
-                                .orElseThrow(() -> new RuntimeException("Lỗi: Không tìm thấy user từ token"));
-
-                // 2. Gọi service
-                MeetingDTO meetingDTO = meetingService.getMeetingById(id, currentUser.getId());
-
-                return ResponseEntity.ok(meetingDTO); // 200 OK
-        }
-
-        /**
-         * API Lấy danh sách các cuộc họp của tôi (US-6)
-         * (Các cuộc họp tôi tổ chức HOẶC được mời)
-         */
-        @GetMapping("/my-meetings")
-        @Operation(summary = "Lấy danh sách các cuộc họp của tôi (có phân trang)")
-        public ResponseEntity<Page<MeetingDTO>> getMyMeetings(
-                        @AuthenticationPrincipal UserDetails userDetails,
-                        @PageableDefault(size = 20, sort = "startTime", direction = Sort.Direction.DESC) Pageable pageable) {
-
-                // 1. Lấy ID user từ token
-                com.cmc.meeting.domain.model.User currentUser = userRepository.findByUsername(userDetails.getUsername())
-                                .orElseThrow(() -> new RuntimeException("Lỗi: Không tìm thấy user từ token"));
-
-                // 2. Gọi service
-                Page<MeetingDTO> meetings = meetingService.getMyMeetings(currentUser.getId(), pageable);
-
-                return ResponseEntity.ok(meetings); // 200 OK
-        }
-
-        /**
-         * API Cập nhật/Sửa một lịch họp (US-2)
-         */
-        @PutMapping("/{id}") // Dùng phương thức PUT
-        @Operation(summary = "Cập nhật một lịch họp (chỉ người tổ chức)")
-        public ResponseEntity<MeetingDTO> updateMeeting(
-                        @PathVariable Long id, // Lấy ID từ URL
-                        @Valid @RequestBody MeetingUpdateRequest request,
-                        @AuthenticationPrincipal UserDetails userDetails) {
-
-                // 1. Lấy ID user từ token
-                com.cmc.meeting.domain.model.User currentUser = userRepository.findByUsername(userDetails.getUsername())
-                                .orElseThrow(() -> new RuntimeException("Lỗi: Không tìm thấy user từ token"));
-
-                // 2. Gọi service
-                MeetingDTO updatedMeeting = meetingService.updateMeeting(id, request, currentUser.getId());
-
-                return ResponseEntity.ok(updatedMeeting); // 200 OK
-        }
-
-        @PostMapping("/{id}/respond") // Dùng phương thức POST
-        @Operation(summary = "Chấp nhận (ACCEPT) hoặc Từ chối (DECLINE) một lời mời họp")
-        public ResponseEntity<?> respondToInvitation(
-                        @PathVariable Long id, // Lấy ID cuộc họp từ URL
-                        @Valid @RequestBody MeetingResponseRequest request,
-                        @AuthenticationPrincipal UserDetails userDetails) {
-
-                // 1. Lấy ID user từ token
-                com.cmc.meeting.domain.model.User currentUser = userRepository.findByUsername(userDetails.getUsername())
-                                .orElseThrow(() -> new RuntimeException("Lỗi: Không tìm thấy user từ token"));
-
-                // 2. Gọi service
-                meetingService.respondToInvitation(id, request, currentUser.getId());
-
-                return ResponseEntity.ok("Đã phản hồi lời mời thành công."); // 200 OK
-        }
-
-        @GetMapping(value = "/respond-by-link", produces = "text/html;charset=UTF-8")
-        @Operation(summary = "Phản hồi lời mời họp qua link email (Không cần đăng nhập)")
-        public ResponseEntity<String> respondByLink(
-                        @RequestParam String token,
-                        @RequestParam ParticipantStatus status) {
-
-                try {
-                        String message = meetingService.respondByLink(token, status);
-
-                        // Trả về 1 trang HTML đơn giản
-                        String htmlResponse = String.format(
-                                        "<html><body style='font-family: Arial; text-align: center; margin-top: 50px;'>"
-                                                        +
-                                                        "<h1>%s</h1>" +
-                                                        "<p>Bạn có thể đóng tab này.</p>" +
-                                                        "</body></html>",
-                                        message);
-                        return ResponseEntity.ok(htmlResponse);
-
-                } catch (Exception e) {
-                        String htmlError = String.format(
-                                        "<html><body style='font-family: Arial; text-align: center; margin-top: 50px;'>"
-                                                        +
-                                                        "<h1>Đã xảy ra lỗi</h1>" +
-                                                        "<p>%s</p>" +
-                                                        "</body></html>",
-                                        e.getMessage());
-                        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(htmlError);
-                }
-        }
-
-        @PostMapping("/check-in")
-        @Operation(summary = "Check-in vào một cuộc họp (chỉ người tổ chức)")
-        public ResponseEntity<?> checkInToMeeting(
-                        @Valid @RequestBody CheckInRequest request,
-                        @AuthenticationPrincipal UserDetails userDetails) {
-
-                // 1. Lấy ID user từ token
-                com.cmc.meeting.domain.model.User currentUser = userRepository.findByUsername(userDetails.getUsername())
-                                .orElseThrow(() -> new RuntimeException("Lỗi: Không tìm thấy user từ token"));
-
-                // 2. Gọi service
-                String message = meetingService.checkIn(request, currentUser.getId());
-
-                return ResponseEntity.ok(message); // 200 OK
-        }
-
-        /**
-         * API Gợi ý thời gian họp (US-5)
-         */
-        @PostMapping("/suggest-time")
-        @Operation(summary = "Gợi ý các khung thời gian họp còn trống cho một nhóm người")
-        public ResponseEntity<List<TimeSlotDTO>> suggestTime(
-                        @Valid @RequestBody TimeSuggestionRequest request,
-                        @AuthenticationPrincipal UserDetails userDetails) {
-
-                // (Chúng ta có thể thêm logic kiểm tra xem người gọi
-                // có trong danh sách participantIds không)
-
-                List<TimeSlotDTO> suggestions = timeSuggestionService.suggestTime(request);
-                return ResponseEntity.ok(suggestions);
-        }
-
-        /**
-         * API Hủy toàn bộ chuỗi lịch định kỳ (US-3)
-         */
-        @DeleteMapping("/series/{seriesId}")
-        @Operation(summary = "Hủy toàn bộ chuỗi lịch định kỳ (chỉ người tổ chức)")
-        public ResponseEntity<?> cancelMeetingSeries(
-                        @PathVariable String seriesId, // Lấy ID chuỗi từ URL
-                        @Valid @RequestBody MeetingCancelRequest request,
-                        @AuthenticationPrincipal UserDetails userDetails) {
-
-                com.cmc.meeting.domain.model.User currentUser = userRepository.findByUsername(userDetails.getUsername())
-                                .orElseThrow(() -> new RuntimeException("Lỗi: Không tìm thấy user từ token"));
-
-                meetingService.cancelMeetingSeries(seriesId, request, currentUser.getId());
-
-                return ResponseEntity.ok("Đã hủy các cuộc họp (chưa diễn ra) trong chuỗi thành công.");
-        }
-
-        /**
-         * API Cập nhật toàn bộ chuỗi lịch định kỳ (BS-2.1)
-         * (Bằng cách hủy cũ, tạo mới)
-         */
-        @PutMapping("/series/{seriesId}")
-        @Operation(summary = "Cập nhật toàn bộ chuỗi lịch định kỳ (chỉ người tổ chức)")
-        public ResponseEntity<MeetingDTO> updateMeetingSeries(
-                        @PathVariable String seriesId,
-                        @Valid @RequestBody MeetingCreationRequest request,
-                        @AuthenticationPrincipal UserDetails userDetails) {
-
-                User currentUser = userRepository.findByUsername(userDetails.getUsername())
-                                .orElseThrow(() -> new RuntimeException("Lỗi: Không tìm thấy user từ token"));
-
-                // (request phải chứa RecurrenceRule mới)
-                if (request.getRecurrenceRule() == null) {
-                        throw new IllegalArgumentException("Cập nhật chuỗi phải bao gồm RecurrenceRule mới.");
-                }
-
-                MeetingDTO firstMeeting = meetingService.updateMeetingSeries(
-                                seriesId, request, currentUser.getId());
-
-                return ResponseEntity.ok(firstMeeting);
-        }
-
-        @PostMapping("/check-in/qr")
-        @Operation(summary = "Check-in tham dự cuộc họp bằng mã QR")
-        public ResponseEntity<String> checkInByQr(
-                        @RequestBody Map<String, String> payload,
-                        @AuthenticationPrincipal UserDetails userDetails) {
-
-                String qrCode = payload.get("qrCode");
-                if (qrCode == null || qrCode.isBlank()) {
-                        return ResponseEntity.badRequest().body("Mã QR không được để trống.");
-                }
-
-                // Lấy ID người đang quét mã
-                Long userId = getUserId(userDetails); // Sử dụng hàm helper getUserId có sẵn trong controller
-
-                // Gọi Service xử lý
-                meetingService.checkInByQrCode(qrCode, userId);
-
-                return ResponseEntity.ok("Check-in thành công! Chào mừng bạn vào họp.");
-        }
-
-        private Long getUserId(UserDetails userDetails) {
-                User user = userRepository.findByUsername(userDetails.getUsername())
-                                .orElseThrow(() -> new EntityNotFoundException("User không tồn tại (Token invalid)"));
-                return user.getId();
-        }
-
-        @GetMapping("/{id}/sync/google")
-        @Operation(summary = "Lấy link để thêm vào Google Calendar")
-        public ResponseEntity<Map<String, String>> getGoogleCalendarLink(@PathVariable Long id) {
-                String googleLink = meetingService.generateGoogleCalendarLink(id);
-
-                // Trả về JSON cho đẹp: { "url": "https://calendar.google.com..." }
-                return ResponseEntity.ok(Collections.singletonMap("url", googleLink));
-        }
-
-        @GetMapping("/{id}/test-sync-google")
-        @Operation(summary = "Test API: Gọi trực tiếp Google Sync để xem log lỗi ngay lập tức")
-        public ResponseEntity<?> testSyncGoogle(@PathVariable Long id,
-                        @AuthenticationPrincipal UserDetails userDetails) {
-                try {
-                        // A. Lấy User thực từ Token
-                        User currentUser = userRepository.findByUsername(userDetails.getUsername())
-                                        .orElseThrow(() -> new RuntimeException("User not found"));
-
-                        // B. Lấy Meeting Gốc (Entity) từ DB (Không dùng DTO vì Adapter cần Entity)
-                        Meeting meeting = meetingRepository.findById(id)
-                                        .orElseThrow(() -> new EntityNotFoundException("Meeting not found: " + id));
-
-                        // C. Gọi trực tiếp Adapter (Bỏ qua Async để debug)
-                        googleCalendarAdapter.pushMeetingToGoogle(currentUser.getId(), meeting);
-
-                        return ResponseEntity.ok(
-                                        "Đã gọi hàm Sync xong. Vui lòng KIỂM TRA LOG SERVER (Console) ngay bây giờ để xem kết quả.");
-                } catch (Exception e) {
-                        // Nếu có lỗi hệ thống (ví dụ code sai) thì nó hiện ở đây
-                        return ResponseEntity.badRequest().body("Lỗi khi gọi hàm: " + e.getMessage());
-                }
-        }
+    }
 }

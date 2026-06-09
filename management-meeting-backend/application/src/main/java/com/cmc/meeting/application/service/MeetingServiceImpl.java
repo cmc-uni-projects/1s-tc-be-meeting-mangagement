@@ -308,14 +308,17 @@ public class MeetingServiceImpl implements MeetingService {
         log.info("Hủy chuỗi {}: Tìm thấy {} cuộc họp.", seriesId, meetingsInSeries.size());
 
         for (Meeting meeting : meetingsInSeries) {
-            if (meeting.getStartTime().isAfter(LocalDateTime.now()) &&
-                    meeting.getStatus() == BookingStatus.CONFIRMED) {
+            // Thêm điều kiện OR PENDING_APPROVAL
+            boolean isFuture = meeting.getStartTime().isAfter(LocalDateTime.now());
+            boolean isActive = meeting.getStatus() == BookingStatus.CONFIRMED || 
+                               meeting.getStatus() == BookingStatus.PENDING_APPROVAL;
 
+            if (isFuture && isActive) {
                 log.info("-> Đang hủy Meeting ID: {}", meeting.getId());
                 meeting.cancelMeeting(request.getReason());
                 meetingRepository.save(meeting);
 
-                // === LOGIC MỚI: XÓA TRÊN GOOGLE ===
+                // Xóa trên Google (chỉ nếu đã sync)
                 if (meeting.getGoogleEventId() != null) {
                     eventPublisher.publishEvent(new MeetingCancelledEvent(
                         meeting.getId(), 
@@ -342,17 +345,25 @@ public class MeetingServiceImpl implements MeetingService {
         if (!firstMeeting.getOrganizer().getId().equals(currentUserId)) {
             throw new PolicyViolationException("Chỉ người tổ chức mới có quyền sửa chuỗi họp này.");
         }
+        
+        // (Bổ sung) Validate request
+        if (request.getRecurrenceRule() == null) {
+             throw new IllegalArgumentException("Cập nhật chuỗi yêu cầu phải có rule lặp lại.");
+        }
 
         String reason = "Cuộc họp định kỳ đã được cập nhật hoặc thay đổi.";
         for (Meeting meeting : meetingsInSeries) {
-            if (meeting.getStartTime().isAfter(LocalDateTime.now()) &&
-                    meeting.getStatus() == BookingStatus.CONFIRMED) {
+            //  Thêm điều kiện OR PENDING_APPROVAL
+            boolean isFuture = meeting.getStartTime().isAfter(LocalDateTime.now());
+            boolean isActive = meeting.getStatus() == BookingStatus.CONFIRMED || 
+                               meeting.getStatus() == BookingStatus.PENDING_APPROVAL;
 
+            if (isFuture && isActive) {
                 log.info("-> (Update) Hủy Meeting ID: {}", meeting.getId());
                 meeting.cancelMeeting(reason);
                 meetingRepository.save(meeting);
 
-                // === LOGIC MỚI: XÓA TRÊN GOOGLE (Để sau đó tạo mới lại) ===
+                // Xóa trên Google
                 if (meeting.getGoogleEventId() != null) {
                     eventPublisher.publishEvent(new MeetingCancelledEvent(
                         meeting.getId(), 
@@ -366,8 +377,6 @@ public class MeetingServiceImpl implements MeetingService {
         log.info("-> (Update) Đang tạo chuỗi họp mới thay thế...");
         return this.createMeeting(request, currentUserId);
     }
-
-    // --- CÁC HÀM KHÁC GIỮ NGUYÊN ---
 
     @Override
     @Transactional(readOnly = true)

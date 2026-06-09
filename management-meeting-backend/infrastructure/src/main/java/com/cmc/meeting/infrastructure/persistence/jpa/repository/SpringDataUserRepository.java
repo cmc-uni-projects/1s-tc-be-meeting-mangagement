@@ -13,6 +13,8 @@ public interface SpringDataUserRepository extends JpaRepository<UserEntity, Long
 
     Optional<UserEntity> findByUsername(String username);
 
+    Optional<UserEntity> findByAuthServiceId(Long authServiceId); // Spring Data JPA tự hiểu
+
     @Query("SELECT u FROM UserEntity u WHERE " +
             "LOWER(u.fullName) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
             "LOWER(u.username) LIKE LOWER(CONCAT('%', :query, '%'))")

@@ -1,8 +1,9 @@
 package com.cmc.meeting.web.controller;
 
-import com.cmc.meeting.application.dto.request.ApprovalRequest; // DTO bạn đã tạo ở Bước 3
+import com.cmc.meeting.application.dto.request.ApprovalRequest;
 import com.cmc.meeting.application.port.service.MeetingService;
 import com.cmc.meeting.domain.port.repository.UserRepository;
+
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -11,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -27,22 +29,31 @@ public class AdminMeetingController {
         this.userRepository = userRepository;
     }
 
-    /**
-     * API Phê duyệt hoặc Từ chối cuộc họp
-     */
+    // === HELPER LAI (HYBRID) ===
+    private Long getAdminId(Object principal) {
+        String username;
+        if (principal instanceof UserDetails) {
+            username = ((UserDetails) principal).getUsername();
+        } else if (principal instanceof Jwt) {
+            username = ((Jwt) principal).getSubject();
+        } else {
+            throw new RuntimeException("Loại xác thực không hỗ trợ: " + principal.getClass());
+        }
+
+        return userRepository.findByUsername(username)
+                .orElseThrow(() -> new EntityNotFoundException("Admin not found"))
+                .getId();
+    }
+
     @PutMapping("/{id}/approval")
     @Operation(summary = "Phê duyệt (Approve) hoặc Từ chối (Reject) cuộc họp")
     public ResponseEntity<?> approveMeeting(
             @PathVariable Long id,
             @RequestBody ApprovalRequest request,
-            @AuthenticationPrincipal UserDetails userDetails) {
+            @AuthenticationPrincipal Object principal) { // <--- SỬA
         
-        // Lấy ID Admin đang thực hiện
-        Long adminId = userRepository.findByUsername(userDetails.getUsername())
-                .orElseThrow(() -> new EntityNotFoundException("Admin not found"))
-                .getId();
+        Long adminId = getAdminId(principal);
 
-        // Gọi Service
         meetingService.processMeetingApproval(id, request.isApproved(), request.getReason(), adminId);
         
         String action = request.isApproved() ? "phê duyệt" : "từ chối";

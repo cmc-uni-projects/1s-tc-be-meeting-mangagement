@@ -92,5 +92,11 @@ public class UserRepositoryAdapter implements UserRepository {
                 .map(entity -> modelMapper.map(entity, User.class))
                 .collect(Collectors.toList());
     }
-    
+    @Override 
+    public Optional<User> findByAuthServiceId(Long authServiceId) {
+        // 1. Tìm UserEntity bằng Auth Service ID
+        // 2. Map Entity sang Domain Model (User) để trả về
+        return jpaRepository.findByAuthServiceId(authServiceId)
+                .map(entity -> modelMapper.map(entity, User.class));
+    }
 }

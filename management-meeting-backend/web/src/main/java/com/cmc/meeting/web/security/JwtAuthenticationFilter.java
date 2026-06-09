@@ -4,6 +4,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -18,54 +20,54 @@ import java.io.IOException;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-    private final JwtTokenProvider tokenProvider;
-    private final UserDetailsService userDetailsService; // Inject CustomUserDetailsService
+    private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
-    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider, 
-                                   UserDetailsService userDetailsService) {
+    private final JwtTokenProvider tokenProvider;
+    private final UserDetailsService userDetailsService;
+
+    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider,
+            UserDetailsService userDetailsService) {
         this.tokenProvider = tokenProvider;
         this.userDetailsService = userDetailsService;
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, 
-                                    HttpServletResponse response, 
-                                    FilterChain filterChain) throws ServletException, IOException {
-        
+    protected void doFilterInternal(HttpServletRequest request,
+            HttpServletResponse response,
+            FilterChain filterChain) throws ServletException, IOException {
+
+
         try {
-            // 1. Lấy token từ header
             String jwt = getJwtFromRequest(request);
 
-            // 2. Kiểm tra token (có tồn tại và hợp lệ không)
-            if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt)) {
-                
-                // 3. Lấy USERNAME từ token (đã sửa)
-                String username = tokenProvider.getUsernameFromToken(jwt);
-                
-                // 4. Tải thông tin user (từ CustomUserDetailsService)
-                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-                
-                // 5. Tạo đối tượng Authentication
-                UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                        userDetails, null, userDetails.getAuthorities());
-                
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+            // Chỉ xử lý nếu chưa có ai xác thực trước đó
+            if (StringUtils.hasText(jwt) && SecurityContextHolder.getContext().getAuthentication() == null) {
 
-                // 6. SET VÀO SECURITY CONTEXT
-                // Báo cho Spring biết user này đã được xác thực
-                SecurityContextHolder.getContext().setAuthentication(authentication);
+                // 1. Thử validate theo chuẩn Local (HMAC)
+                if (tokenProvider.validateToken(jwt)) {
+                    String username = tokenProvider.getUsernameFromToken(jwt);
+                    UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+
+                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                            userDetails, null, userDetails.getAuthorities());
+                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                    log.debug("✅ [Local Auth] Xác thực thành công user: {}", username);
+                }
+                // 2. Nếu validateToken trả về false (do Token là RSA của SSO), ta KHÔNG LÀM GÌ
+                // CẢ.
+                // Để yên cho Filter tiếp theo (BearerTokenAuthenticationFilter) xử lý.
             }
         } catch (Exception ex) {
-            logger.error("Could not set user authentication in security context", ex);
+            // Log debug để không spam console
+            log.trace("⚠️ Token không hợp lệ với Local Provider (có thể là Token SSO): {}", ex.getMessage());
         }
 
-        // 7. Cho phép request đi tiếp (tới Controller)
+        // 👇 QUAN TRỌNG: Chuyển tiếp request NGUYÊN BẢN
         filterChain.doFilter(request, response);
     }
 
-    /**
-     * Helper để trích xuất token từ Header "Authorization: Bearer [token]"
-     */
     private String getJwtFromRequest(HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");
         if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {

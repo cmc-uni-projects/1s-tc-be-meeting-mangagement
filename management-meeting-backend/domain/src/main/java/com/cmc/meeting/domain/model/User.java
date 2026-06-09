@@ -20,4 +20,5 @@ public class User {
     private boolean isActive = true; // us-18
     private String googleRefreshToken;
     private boolean isGoogleLinked = false;
+    private Long authServiceId;
 }
