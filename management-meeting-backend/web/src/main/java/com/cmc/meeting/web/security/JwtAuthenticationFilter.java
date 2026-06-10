@@ -30,20 +30,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final UserDetailsService userDetailsService;
 
     public JwtAuthenticationFilter(JwtTokenProvider tokenProvider,
-                                   UserDetailsService userDetailsService) {
+            UserDetailsService userDetailsService) {
         this.tokenProvider = tokenProvider;
         this.userDetailsService = userDetailsService;
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
+            HttpServletResponse response,
+            FilterChain filterChain) throws ServletException, IOException {
+
+
         try {
             String jwt = getJwtFromRequest(request);
 
             if (StringUtils.hasText(jwt) && SecurityContextHolder.getContext().getAuthentication() == null) {
-                
+
                 // --- THỬ XÁC THỰC NHƯ LÀ TOKEN LOCAL ---
                 boolean isValidLocalToken = false;
                 try {
@@ -84,7 +86,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             return super.getHeaders(name);
                         }
                     };
-                    
+
                     // Chuyển tiếp request đã bị giấu header
                     filterChain.doFilter(hiddenHeaderRequest, response);
                     return; // Dừng hàm tại đây, không chạy dòng filterChain ở cuối

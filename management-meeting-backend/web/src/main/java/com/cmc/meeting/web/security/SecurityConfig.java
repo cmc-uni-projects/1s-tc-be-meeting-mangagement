@@ -13,13 +13,18 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter; // Import này
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
 
 import java.util.List;
 
@@ -29,22 +34,38 @@ import java.util.List;
 public class SecurityConfig {
 
     @Autowired
-    private JwtAuthenticationFilter jwtAuthenticationFilter;
+    private CustomJwtAuthenticationConverter customJwtAuthenticationConverter;
 
     @Autowired
-    private CustomJwtAuthenticationConverter customJwtAuthenticationConverter;
+    private JwtAuthenticationFilter jwtAuthenticationFilter;
 
     @Value("${auth.service.jwk-set-uri}")
     private String jwkSetUri;
 
+    @Value("${app.jwt.secret}")
+    private String localJwtSecret;
+
+    // [MỚI] Inject danh sách Allowed Origins từ application.yml
+    // Spring sẽ tự động chuyển chuỗi phân cách bằng dấu phẩy thành List
+    @Value("#{'${app.cors.allowed-origins}'.split(',')}")
+    private List<String> allowedOrigins;
+
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:5173", "http://localhost:3000", "http://localhost:8000"));
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
-        configuration.setAllowCredentials(true);
         
+        // [CẬP NHẬT] Sử dụng biến môi trường thay vì "*"
+        configuration.setAllowedOrigins(allowedOrigins);
+
+        // Cấu hình các method cho phép
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+
+        // Cho phép tất cả headers
+        configuration.setAllowedHeaders(List.of("*"));
+
+        // Cho phép gửi Cookie/Credentials
+        configuration.setAllowCredentials(true);
+
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
@@ -56,8 +77,27 @@ public class SecurityConfig {
     }
 
     @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration)
+            throws Exception {
         return authenticationConfiguration.getAuthenticationManager();
+    }
+
+    @Bean
+    public JwtDecoder jwtDecoder() {
+        NimbusJwtDecoder ssoDecoder = NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build();
+
+        SecretKeySpec secretKey = new SecretKeySpec(localJwtSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA512");
+        NimbusJwtDecoder localDecoder = NimbusJwtDecoder.withSecretKey(secretKey)
+                .macAlgorithm(MacAlgorithm.HS512)
+                .build();
+
+        return token -> {
+            try {
+                return localDecoder.decode(token);
+            } catch (Exception e) {
+                return ssoDecoder.decode(token);
+            }
+        };
     }
 
     @Bean
@@ -68,24 +108,22 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .formLogin(login -> login.disable())
             .httpBasic(basic -> basic.disable())
-
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
-                    "/api/v1/auth/**", 
-                    "/v3/api-docs/**", 
-                    "/swagger-ui/**", 
+                    "/api/v1/auth/**",
+                    "/v3/api-docs/**",
+                    "/swagger-ui/**",
                     "/swagger-ui.html",
                     "/api/v1/meetings/respond-by-link"
                 ).permitAll()
                 .anyRequest().authenticated()
             )
-
             .exceptionHandling(e -> e
                 .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
             )
 
             // [SỬA QUAN TRỌNG NHẤT]: Dùng .addFilterBefore thay vì .addFilterAfter
-            // Local Filter chạy TRƯỚC. 
+            // Local Filter chạy TRƯỚC.
             // - Nếu là Token Local: Nó validate OK -> Set Auth -> Resource Server thấy có Auth rồi sẽ bỏ qua.
             // - Nếu là Token SSO: Nó validate Fail -> Catch Exception (Debug log) -> Chuyển tiếp cho Resource Server xử lý.
             .addFilterBefore(jwtAuthenticationFilter, BearerTokenAuthenticationFilter.class)
@@ -96,7 +134,7 @@ public class SecurityConfig {
                     .jwtAuthenticationConverter(customJwtAuthenticationConverter)
                 )
             );
-        
+
         return http.build();
     }
 }

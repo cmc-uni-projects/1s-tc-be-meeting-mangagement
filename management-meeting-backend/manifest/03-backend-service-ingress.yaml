@@ -1,0 +1,41 @@
+# 1. Service nội bộ
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-svc
+  namespace: meeting-system
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app: backend
+
+---
+# 2. Ingress (Domain công khai)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: backend-ingress
+  namespace: meeting-system
+  annotations:
+    # Tăng giới hạn body size nếu bạn có upload file (Cloudinary)
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    # Cấu hình CORS cho Ingress (Optional - Backend đã xử lý rồi nhưng thêm cho chắc)
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: api-meeting.co
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-svc
+                port:
+                  number: 8080

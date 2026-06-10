@@ -180,5 +180,25 @@ public interface SpringDataMeetingRepository extends JpaRepository<MeetingEntity
         @Query("SELECT m FROM MeetingEntity m WHERE m.room.id = :roomId AND :checkTime BETWEEN m.startTime AND m.endTime AND m.status = 'CONFIRMED'")
         Optional<MeetingEntity> findActiveMeetingInRoom(@Param("roomId") Long roomId,
                         @Param("checkTime") LocalDateTime checkTime);
+
         Optional<MeetingEntity> findByCheckinCode(String checkinCode);
+
+        // 1. Kiểm tra xem có lịch nào ĐÃ CHỐT (CONFIRMED) trong khung giờ này không?
+        @Query("SELECT COUNT(m) > 0 FROM MeetingEntity m " +
+                        "WHERE m.room.id = :roomId " +
+                        "AND m.status = 'CONFIRMED' " + // Chỉ chặn nếu đã CONFIRMED
+                        "AND m.id <> :meetingIdToIgnore " +
+                        "AND ((m.startTime < :endTime) AND (m.endTime > :startTime))")
+        boolean existsConfirmedMeetingInTimeRange(Long roomId, LocalDateTime startTime, LocalDateTime endTime,
+                        Long meetingIdToIgnore);
+
+        // 2. Tìm các lịch đang CHỜ DUYỆT (PENDING) bị trùng với khung giờ này (để hủy
+        // đi)
+        @Query("SELECT m FROM MeetingEntity m " +
+                        "WHERE m.room.id = :roomId " +
+                        "AND m.status = 'PENDING_APPROVAL' " + // Chỉ tìm những thằng đang chờ
+                        "AND m.id <> :excludedMeetingId " + // Trừ chính thằng đang được duyệt ra
+                        "AND ((m.startTime < :endTime) AND (m.endTime > :startTime))")
+        List<MeetingEntity> findPendingConflicts(Long roomId, LocalDateTime startTime, LocalDateTime endTime,
+                        Long excludedMeetingId);
 }
