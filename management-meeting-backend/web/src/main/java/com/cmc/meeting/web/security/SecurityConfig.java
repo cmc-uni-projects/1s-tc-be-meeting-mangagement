@@ -52,18 +52,18 @@ public class SecurityConfig {
         
         // [CẬP NHẬT] Sử dụng biến môi trường thay vì "*"
         configuration.setAllowedOrigins(allowedOrigins);
-        
+
         // Cấu hình các method cho phép
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        
+
         // Cho phép tất cả headers
         configuration.setAllowedHeaders(List.of("*"));
-        
+
         // Cho phép gửi Cookie/Credentials
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
+        source.registerCorsConfiguration("/**", configuration); // Áp dụng cho mọi API
         return source;
     }
 
