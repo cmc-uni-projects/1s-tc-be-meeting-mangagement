@@ -45,7 +45,7 @@ public class UserServiceImpl implements UserService {
     public UserDTO getUserProfile(String username) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new EntityNotFoundException("User not found: " + username));
-        
+
         // Map sang DTO và trả về (bao gồm cả Roles mới nhất từ DB)
         return convertToDTO(user);
     }
