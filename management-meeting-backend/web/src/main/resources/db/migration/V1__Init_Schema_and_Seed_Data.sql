@@ -13,6 +13,11 @@ INSERT INTO users (id, username, full_name, password, is_google_linked) VALUES (
 INSERT INTO users (id, username, full_name, password, is_google_linked) VALUES (2, 'user2@cmc.com', 'User Hai', @hashed_password, FALSE)
     ON DUPLICATE KEY UPDATE username='user2@cmc.com', password=@hashed_password;
 
+INSERT INTO users (id, username, full_name, password, is_google_linked) VALUES (3, 'admin1@cmc.com', 'Admin 01', @hashed_password, FALSE)
+    ON DUPLICATE KEY UPDATE username='admin1@cmc.com', password=@hashed_password;
+
+INSERT INTO user_roles (user_id, role_name) VALUES (3, 'ROLE_ADMIN');
+
 INSERT INTO app_configuration (config_key, config_value, description) 
 VALUES ('auto.cancel.grace.minutes', '15', 'Thời gian (phút) chờ check-in trước khi tự động hủy họp')
     ON DUPLICATE KEY UPDATE config_value='15';
