@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  namespace: meeting-system
+  labels:
+    app: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      hostAliases:
+        - ip: "192.168.23.110"
+          hostnames:
+            - "oauth-meeting.co"
+            - "api-meeting.co"
+            # Không cần npd-coroot.co ở đây nữa vì ta dùng internal DNS
+
+      containers:
+        - name: backend
+          image: gk123a/meeting-management-backend:v1.0.1-prod
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: backend-secrets
+          
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-javaagent:/app/opentelemetry-javaagent.jar"
+            - name: OTEL_SERVICE_NAME
+              value: "backend-deployment"
+            
+            # Giao thức gửi (Vẫn là HTTP/Protobuf)
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "http/protobuf"
+
+            # [QUAN TRỌNG] Sửa thành đường dẫn nội bộ Kubernetes
+            # Cú pháp: http://<service-name>.<namespace>:<port>/v1/traces
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "http://coroot.monitoring:8080/v1/traces"
+
+            - name: OTEL_METRICS_EXPORTER
+              value: "none"
+            - name: OTEL_LOGS_EXPORTER
+              value: "none"
+
+            # Cấu hình DB (Giữ nguyên)
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:mysql://$(DB_HOST):$(DB_PORT)/$(DB_NAME)?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: DB_USER
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: DB_PASSWORD
+
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 1.5Gi

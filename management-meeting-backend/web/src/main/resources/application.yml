@@ -11,21 +11,21 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          # Địa chỉ Auth Service để lấy Public Key check chữ ký
+          # Auth Service address to get Public Key to check signature
           issuer-uri: ${OAuth2_BASE_URL}
   application:
     name: management-meeting-backend
 
-  # === 1. Cấu hình CSDL (Đọc từ .env) ===
+  # === 1. Database Configuration (Read from .env) ===
   datasource:
-    url: jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_NAME}?createDatabaseIfNotExist=true
+    url: jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_NAME}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Ho_Chi_Minh
     username: ${DB_USER}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
-    # BẬT LẠI: Chạy file data.sql (để sửa lỗi 404)
+    # TURN BACK ON: Run the data.sql file (to fix the 404 error)
     # initialization-mode: always 
 
-  # # === 2. Cấu hình Redis (Đọc từ .env) ===
+  # === 2. Configure Redis (Read from .env) ===
   data:
     redis:
       host: ${REDIS_HOST}
@@ -33,10 +33,10 @@ spring:
       password: ${REDIS_PASSWORD:} 
       database: ${REDIS_DB}
 
-  # === 3. Cấu hình JPA (Code First) ===
+  # === 3. Configure JPA (Code First) ===
   jpa:
     hibernate:
-      # BẬT LẠI: Đây chính là "Code First"
+      # TURNING BACK: This is "Code First"
       ddl-auto: update 
     show-sql: false
     properties:
@@ -45,12 +45,13 @@ spring:
         jdbc:
           time_zone: "Asia/Ho_Chi_Minh"
 
-  # === 4. TẮT FLYWAY ===
+  # === 4. TURN OFF FLYWAY ===
   flyway:
-    enabled: false # Tắt Flyway để tránh xung đột
+    enabled: false # Turn off the flyway to avoid conflicts
   
-  # === BỔ SUNG: Cấu hình SMTP (Email) - DÙNG MAILTRAP ===
+  # === ADDITIONAL: SMTP (Email) Configuration - USE GMAIL ===
   mail:
+    protocol: smtp
     host: ${EMAIL_HOST}
     port: ${EMAIL_PORT}
     username: ${EMAIL_USERNAME}
@@ -61,14 +62,15 @@ spring:
           auth: true
           starttls:
             enable: true
+            required: true
 
-# === 5. Cấu hình Swagger UI ===
+# === 5. Swagger UI Configuration ===
 springdoc:
   paths-to-match: /api/v1/**
   swagger-ui:
     path: /swagger-ui.html
 
-# === BỔ SUNG: Cấu hình ứng dụng ===
+# === ADDITIONAL: Application Configuration ===
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
@@ -83,7 +85,7 @@ app:
 
 auth:
   service:
-    # URL để Resource Server lấy JWK Set (chứa Public Key của Auth Service)
+    # URL for Resource Server to retrieve JWK Set (containing the Public Key of the Auth Service)
     jwk-set-uri: ${OAuth2_BASE_URL}/oauth2/jwks
 google:
   client:
@@ -94,5 +96,8 @@ google:
 
 logging:
   level:
-    org.springframework.security: TRACE
-    org.springframework.security.oauth2: TRACE
+    org.springframework.security: DEBUG
+    org.springframework.security.oauth2: DEBUG
+#  pattern:
+    # %X{trace_id} and %X{span_id} are variables that OTel Agent automatically injects
+#    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [trace_id=%X{trace_id} span_id=%X{span_id}] - %msg%n"

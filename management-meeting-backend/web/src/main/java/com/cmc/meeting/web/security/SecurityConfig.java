@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -15,10 +16,19 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter; // Import này
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+
 
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
@@ -33,7 +43,7 @@ public class SecurityConfig {
     private CustomJwtAuthenticationConverter customJwtAuthenticationConverter;
 
     @Autowired
-    private JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
+    private JwtAuthenticationFilter jwtAuthenticationFilter;
 
     @Value("${auth.service.jwk-set-uri}")
     private String jwkSetUri;
@@ -52,13 +62,13 @@ public class SecurityConfig {
         
         // [CẬP NHẬT] Sử dụng biến môi trường thay vì "*"
         configuration.setAllowedOrigins(allowedOrigins);
-        
+
         // Cấu hình các method cho phép
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        
+
         // Cho phép tất cả headers
         configuration.setAllowedHeaders(List.of("*"));
-        
+
         // Cho phép gửi Cookie/Credentials
         configuration.setAllowCredentials(true);
 
@@ -115,14 +125,20 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
             .exceptionHandling(e -> e
-                .authenticationEntryPoint(jwtAuthenticationEntryPoint)
+                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
             )
+
+            // [SỬA QUAN TRỌNG NHẤT]: Dùng .addFilterBefore thay vì .addFilterAfter
+            // Local Filter chạy TRƯỚC.
+            // - Nếu là Token Local: Nó validate OK -> Set Auth -> Resource Server thấy có Auth rồi sẽ bỏ qua.
+            // - Nếu là Token SSO: Nó validate Fail -> Catch Exception (Debug log) -> Chuyển tiếp cho Resource Server xử lý.
+            .addFilterBefore(jwtAuthenticationFilter, BearerTokenAuthenticationFilter.class)
+
             .oauth2ResourceServer(oauth2 -> oauth2
                 .jwt(jwt -> jwt
-                    .decoder(jwtDecoder())
+                    .jwkSetUri(jwkSetUri)
                     .jwtAuthenticationConverter(customJwtAuthenticationConverter)
                 )
-                .authenticationEntryPoint(jwtAuthenticationEntryPoint)
             );
 
         return http.build();
