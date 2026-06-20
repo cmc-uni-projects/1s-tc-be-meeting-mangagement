@@ -27,11 +27,13 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
                          HttpServletResponse response,
                          AuthenticationException authException) throws IOException, ServletException {
         
-        // 1. Kiểm tra cờ từ Converter (Logic này rất tốt, giữ nguyên)
+        log.error("🔥 Unauthorized Error: {}", authException.getMessage());
+
+        // Kiểm tra cờ từ Converter (Đây là chốt chặn cuối cùng tin cậy nhất)
         Object disabledFlag = request.getAttribute("ACCOUNT_DISABLED_FLAG");
         boolean isUserDisabled = (disabledFlag != null && (Boolean) disabledFlag);
 
-        // 2. Kiểm tra Exception gốc (Nếu cờ chưa bắt được)
+        // Logic check Exception cũ (giữ lại để phòng hờ)
         if (!isUserDisabled) {
             Throwable cause = authException;
             while (cause != null) {
@@ -49,14 +51,15 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
         final Map<String, Object> body = new HashMap<>();
         body.put("status", HttpServletResponse.SC_UNAUTHORIZED);
+        body.put("error", "Unauthorized");
         body.put("path", request.getServletPath());
 
         // [SỬA ĐỔI QUAN TRỌNG TẠI ĐÂY]
         if (isUserDisabled) {
             log.warn("⚠️ [EntryPoint] User bị khóa. Trả về mã lỗi USER_DISABLED cho Frontend.");
-            
+
             // Thêm mã lỗi đặc biệt này để Frontend bắt được và redirect sang SSO Logout
-            body.put("error", "USER_DISABLED"); 
+            body.put("error", "USER_DISABLED");
             body.put("message", "Tài khoản của bạn đã bị vô hiệu hóa. Hệ thống sẽ đăng xuất.");
         } else {
             // Lỗi 401 thông thường (Token hết hạn, sai chữ ký...)

@@ -3,6 +3,7 @@ package com.cmc.meeting.web.security;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequestWrapper; // <-- Cần import này
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +17,9 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.List;
 
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -40,31 +44,60 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             String jwt = getJwtFromRequest(request);
 
-            // Chỉ xử lý nếu chưa có ai xác thực trước đó
             if (StringUtils.hasText(jwt) && SecurityContextHolder.getContext().getAuthentication() == null) {
 
-                // 1. Thử validate theo chuẩn Local (HMAC)
-                if (tokenProvider.validateToken(jwt)) {
-                    String username = tokenProvider.getUsernameFromToken(jwt);
-                    UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                // --- THỬ XÁC THỰC NHƯ LÀ TOKEN LOCAL ---
+                boolean isValidLocalToken = false;
+                try {
+                    if (tokenProvider.validateToken(jwt)) {
+                        isValidLocalToken = true;
+                        String username = tokenProvider.getUsernameFromToken(jwt);
+                        UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
-                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                            userDetails, null, userDetails.getAuthorities());
-                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                                userDetails, null, userDetails.getAuthorities());
+                        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-                    SecurityContextHolder.getContext().setAuthentication(authentication);
-                    log.debug("✅ [Local Auth] Xác thực thành công user: {}", username);
+                        SecurityContextHolder.getContext().setAuthentication(authentication);
+                        log.debug("✅ [Legacy Filter] Token Local hợp lệ cho user: {}", username);
+                    }
+                } catch (Exception e) {
+                    // Nếu lỗi (do là token SSO), chỉ log trace và bỏ qua
+                    log.trace("Token không phải Local Token, bỏ qua.");
                 }
-                // 2. Nếu validateToken trả về false (do Token là RSA của SSO), ta KHÔNG LÀM GÌ
-                // CẢ.
-                // Để yên cho Filter tiếp theo (BearerTokenAuthenticationFilter) xử lý.
+
+                // --- [QUAN TRỌNG] NẾU LÀ TOKEN LOCAL THÀNH CÔNG ---
+                // Ta phải "giấu" header Authorization đi để Resource Server phía sau không check lại nữa
+                if (isValidLocalToken) {
+                    HttpServletRequestWrapper hiddenHeaderRequest = new HttpServletRequestWrapper(request) {
+                        @Override
+                        public String getHeader(String name) {
+                            if ("Authorization".equalsIgnoreCase(name)) {
+                                return null; // Trả về null để Resource Server tưởng không có token
+                            }
+                            return super.getHeader(name);
+                        }
+
+                        @Override
+                        public Enumeration<String> getHeaders(String name) {
+                            if ("Authorization".equalsIgnoreCase(name)) {
+                                return Collections.enumeration(List.of());
+                            }
+                            return super.getHeaders(name);
+                        }
+                    };
+
+                    // Chuyển tiếp request đã bị giấu header
+                    filterChain.doFilter(hiddenHeaderRequest, response);
+                    return; // Dừng hàm tại đây, không chạy dòng filterChain ở cuối
+                }
             }
         } catch (Exception ex) {
-            // Log debug để không spam console
-            log.trace("⚠️ Token không hợp lệ với Local Provider (có thể là Token SSO): {}", ex.getMessage());
+            log.error("Lỗi không xác định trong JwtAuthenticationFilter", ex);
         }
 
-        // 👇 QUAN TRỌNG: Chuyển tiếp request NGUYÊN BẢN
+        // Nếu không phải token local (hoặc không có token), chuyển tiếp request nguyên bản
+        // để Resource Server (SSO) xử lý tiếp.
         filterChain.doFilter(request, response);
     }
 

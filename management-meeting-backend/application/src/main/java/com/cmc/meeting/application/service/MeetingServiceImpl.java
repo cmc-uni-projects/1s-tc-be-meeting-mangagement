@@ -484,18 +484,60 @@ public class MeetingServiceImpl implements MeetingService {
         }
 
         if (isApproved) {
+            // 1. Kiểm tra lại lần cuối xem có ai nhanh tay CONFIRMED trước đó không (Double-check)
+            boolean hasConflict = meetingRepository.existsConfirmedMeetingInTimeRange(
+                    meeting.getRoom().getId(), meeting.getStartTime(), meeting.getEndTime(), meeting.getId());
+            
+            if (hasConflict) {
+                throw new MeetingConflictException("Đã có một cuộc họp khác được duyệt (CONFIRMED) trong khung giờ này rồi!");
+            }
+
+            // 2. Chốt lịch này (Winner)
             meeting.setStatus(BookingStatus.CONFIRMED);
             meetingRepository.save(meeting);
             
-            eventPublisher.publishEvent(new MeetingCreatedEvent(meeting.getId())); // Trigger Google Sync here
+            // Trigger Google Sync & Events
+            eventPublisher.publishEvent(new MeetingCreatedEvent(meeting.getId())); 
 
+            // Thông báo cho Organizer của lịch được duyệt
             notificationService.createNotification(meeting.getOrganizer(),
                     "Phòng họp '" + meeting.getRoom().getName() + "' đã được phê duyệt!", meeting);
 
+            // Gửi lời mời cho người tham gia
             String inviteMsg = String.format("%s đã mời bạn tham gia cuộc họp: %s",
                     meeting.getOrganizer().getFullName(), meeting.getTitle());
             sendNotificationsToParticipants(meeting, inviteMsg);
+
+            // === [LOGIC MỚI] 3. TỰ ĐỘNG HỦY CÁC LỊCH PENDING TRÙNG (Losers) ===
+            // Tìm các lịch PENDING khác cùng phòng, cùng giờ
+            List<Meeting> pendingConflicts = meetingRepository.findPendingConflicts(
+                    meeting.getRoom().getId(), meeting.getStartTime(), meeting.getEndTime(), meeting.getId());
+
+            if (!pendingConflicts.isEmpty()) {
+                log.info("Admin duyệt meeting {}. Hệ thống tự động từ chối {} yêu cầu khác bị trùng.", meetingId, pendingConflicts.size());
+                
+                String autoRejectReason = String.format(
+                        "Hệ thống tự động từ chối do Admin đã duyệt ưu tiên cho cuộc họp: '%s' (%s - %s)",
+                        meeting.getTitle(), 
+                        meeting.getStartTime().toLocalTime(), 
+                        meeting.getEndTime().toLocalTime());
+
+                for (Meeting conflictingMeeting : pendingConflicts) {
+                    conflictingMeeting.setStatus(BookingStatus.REJECTED);
+                    conflictingMeeting.setCancelReason(autoRejectReason); 
+                    meetingRepository.save(conflictingMeeting);
+
+                    // Gửi thông báo cho người bị từ chối
+                    notificationService.createNotification(
+                            conflictingMeeting.getOrganizer(),
+                            "Yêu cầu đặt phòng '" + meeting.getRoom().getName() + "' của bạn bị TỪ CHỐI TỰ ĐỘNG. Lý do: Đã duyệt cho người khác.",
+                            conflictingMeeting
+                    );
+                }
+            }
+
         } else {
+            // Trường hợp Admin từ chối thủ công
             meeting.setStatus(BookingStatus.REJECTED);
             meetingRepository.save(meeting);
             String rejectMsg = String.format("Yêu cầu đặt phòng '%s' bị từ chối. Lý do: %s",
@@ -543,10 +585,12 @@ public class MeetingServiceImpl implements MeetingService {
     private void checkAccessAndConflicts(Room room, User organizer, Set<User> participants, Set<Device> devices,
             LocalDateTime startTime, LocalDateTime endTime, Long meetingIdToIgnore) {
         
+        // 1. Kiểm tra trạng thái phòng
         if (room.getStatus() == RoomStatus.UNDER_MAINTENANCE) {
             throw new PolicyViolationException(String.format("Phòng '%s' đang bảo trì, không thể đặt.", room.getName()));
         }
 
+        // 2. Kiểm tra quyền hạn (Role)
         Set<Role> requiredRoles = room.getRequiredRoles();
         if (requiredRoles != null && !requiredRoles.isEmpty()) {
             boolean hasPermission = organizer.getRoles().stream().anyMatch(requiredRoles::contains);
@@ -556,10 +600,18 @@ public class MeetingServiceImpl implements MeetingService {
             }
         }
 
-        if (meetingRepository.isRoomBusy(room.getId(), startTime, endTime, meetingIdToIgnore)) {
-            throw new MeetingConflictException(String.format("Phòng '%s' đã bị đặt vào lúc %s", room.getName(), startTime));
+        // 3. Kiểm tra Xung đột phòng (Logic Mới: Soft Lock)
+        // Chỉ chặn nếu đã có lịch CONFIRMED. Nếu chỉ có lịch PENDING, vẫn cho đặt tiếp.
+        boolean hasConfirmedBooking = meetingRepository.existsConfirmedMeetingInTimeRange(
+                room.getId(), startTime, endTime, meetingIdToIgnore);
+
+        if (hasConfirmedBooking) {
+            throw new MeetingConflictException(String.format(
+                "Phòng '%s' đã có lịch CHÍNH THỨC (CONFIRMED) vào khung giờ này. Bạn không thể đặt chồng lên.", 
+                room.getName()));
         }
 
+        // 4. Kiểm tra Xung đột người tham gia
         Set<Long> userIdsToCheck = participants.stream().map(User::getId).collect(Collectors.toSet());
         userIdsToCheck.add(organizer.getId());
         List<Meeting> conflictingMeetings = meetingRepository.findConflictingMeetingsForUsers(userIdsToCheck, startTime, endTime, meetingIdToIgnore);
@@ -570,6 +622,7 @@ public class MeetingServiceImpl implements MeetingService {
             throw new MeetingConflictException(String.format("Người tham dự (%s) bị trùng lịch vào lúc %s", conflictingUser, startTime));
         }
 
+        // 5. Kiểm tra Xung đột thiết bị
         Set<Long> deviceIds = devices.stream().map(Device::getId).collect(Collectors.toSet());
         if (meetingRepository.isDeviceBusy(deviceIds, startTime, endTime, meetingIdToIgnore)) {
             throw new MeetingConflictException(String.format("Một hoặc nhiều thiết bị bạn chọn đã bị đặt vào lúc %s", startTime));
