@@ -10,8 +10,7 @@ WORKDIR /app
 COPY . .
 
 # Build the Spring Boot application (skip tests for faster build)
-RUN mvn clean
-RUN mvn install -DskipTests
+RUN mvn clean install -DskipTests
 
 # ============================
 # STAGE 2: Run the application
@@ -21,6 +20,10 @@ FROM eclipse-temurin:21-jre-jammy
 # Set working directory inside the container
 WORKDIR /app
 
+# [THÊM MỚI] 1. Tải OpenTelemetry Java Agent
+# Agent này sẽ tự động gắn vào ứng dụng để bắt các request (Controller -> Service -> DB)
+ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar /app/opentelemetry-javaagent.jar
+
 # Copy the built JAR from the build stage
 COPY --from=build /app/web/target/web-1.0.0-SNAPSHOT.jar ./app.jar
 
@@ -28,7 +31,23 @@ COPY --from=build /app/web/target/web-1.0.0-SNAPSHOT.jar ./app.jar
 EXPOSE 8080
 
 # Environment variable for optional JVM options
-ENV JAVA_OPTS="-Xms256m -Xmx512m"
+ENV JAVA_OPTS="-Xms512m -Xmx1024m"
 
-# Command to run the application
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+# [THÊM MỚI] 2. Cấu hình OpenTelemetry kết nối tới Coroot của bạn
+# Tên service sẽ hiện trên Coroot
+ENV OTEL_SERVICE_NAME="meeting-backend"
+
+# Gửi trace qua giao thức HTTP (phù hợp khi đi qua domain npd-coroot.co port 80)
+ENV OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"
+
+# Địa chỉ Coroot nhận dữ liệu (Ingestion Endpoint)
+# Lưu ý: Với protocol http/protobuf, path chuẩn là /v1/traces
+ENV OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://npd-coroot.co/v1/traces"
+
+# Tắt metrics và logs để giảm tải (chỉ tập trung vào Tracing)
+ENV OTEL_METRICS_EXPORTER="none"
+ENV OTEL_LOGS_EXPORTER="none"
+
+# [THÊM MỚI] 3. Cập nhật lệnh chạy để kích hoạt Agent (-javaagent)
+# Quan trọng: -javaagent phải đặt TRƯỚC -jar
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -javaagent:/app/opentelemetry-javaagent.jar -jar app.jar"]
