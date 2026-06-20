@@ -54,11 +54,17 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
         body.put("error", "Unauthorized");
         body.put("path", request.getServletPath());
 
+        // [SỬA ĐỔI QUAN TRỌNG TẠI ĐÂY]
         if (isUserDisabled) {
-            log.warn("⚠️ [EntryPoint] Phát hiện user bị khóa (qua Flag hoặc Exception). Trả về JSON đặc biệt.");
-            // Message chứa từ khóa "disabled" để Frontend bắt
-            body.put("message", "Tài khoản của bạn đã bị vô hiệu hóa (Account disabled). Vui lòng liên hệ Admin.");
+            log.warn("⚠️ [EntryPoint] User bị khóa. Trả về mã lỗi USER_DISABLED cho Frontend.");
+
+            // Thêm mã lỗi đặc biệt này để Frontend bắt được và redirect sang SSO Logout
+            body.put("error", "USER_DISABLED");
+            body.put("message", "Tài khoản của bạn đã bị vô hiệu hóa. Hệ thống sẽ đăng xuất.");
         } else {
+            // Lỗi 401 thông thường (Token hết hạn, sai chữ ký...)
+            log.error("🔥 Unauthorized Error: {}", authException.getMessage());
+            body.put("error", "UNAUTHORIZED");
             body.put("message", "Phiên đăng nhập không hợp lệ hoặc đã hết hạn.");
         }
 

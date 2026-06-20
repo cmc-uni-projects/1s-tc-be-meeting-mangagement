@@ -79,6 +79,7 @@ public class CustomJwtAuthenticationConverter implements Converter<Jwt, Abstract
                 .map(role -> new SimpleGrantedAuthority(role.getAuthority()))
                 .collect(Collectors.toSet());
 
+        // 4. Trả về đối tượng xác thực Resource Server
         return new JwtAuthenticationToken(jwt, authorities, user.getUsername());
     }
 }
